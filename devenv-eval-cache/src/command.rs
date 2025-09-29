@@ -87,9 +87,9 @@ impl<'a> CachedCommand<'a> {
         if !self.force_refresh
             && let Ok(Some(output)) =
                 query_cached_output(self.pool, &cmd_hash, &self.extra_paths).await
-            {
-                return Ok(output);
-            }
+        {
+            return Ok(output);
+        }
 
         cmd.arg("-vv")
             .arg("--log-format")

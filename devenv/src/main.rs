@@ -41,6 +41,11 @@ async fn main() -> Result<()> {
 
     log::init_tracing(level, cli.global_options.log_format);
 
+    // In flake mode, we may need to adapt some behaviors
+    if cli.global_options.flake_mode {
+        info!("Running in flake-aware mode");
+    }
+
     let mut config = config::Config::load()?;
     for input in cli.global_options.override_input.chunks_exact(2) {
         config

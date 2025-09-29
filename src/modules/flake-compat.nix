@@ -34,6 +34,13 @@ let
       shift
     fi
 
+    # Check if full CLI is available and should be used
+    use_full_cli() {
+      # Only use full CLI if we're in a shell that has it available
+      # The full CLI is installed as 'devenv' but we need to distinguish it from this wrapper
+      [[ "$DEVENV_FULL_CLI_AVAILABLE" == "1" ]] && command -v devenv-cli >/dev/null 2>&1
+    }
+
     case $command in
       up)
         # Re-enter the shell to ensure we use the latest configuration
@@ -49,18 +56,62 @@ let
         echo "devenv: ${version}"
         ;;
 
+      tasks)
+        if use_full_cli; then
+          # Pass through to full CLI with flake-aware mode
+          exec devenv-cli --flake-mode tasks "$@"
+        else
+          echo "Tasks functionality requires the full devenv CLI."
+          echo "This should be automatically available in flake-parts environments."
+          echo "Available tasks commands would be: run, list"
+          exit 1
+        fi
+        ;;
+
+      shell|info|update|search|inputs|build|gc|repl|container|generate|init|direnvrc)
+        if use_full_cli; then
+          # Pass through to full CLI with flake-aware mode
+          exec devenv-cli --flake-mode "$command" "$@"
+        else
+          echo "Command '$command' requires the full devenv CLI."
+          echo "This should be automatically available in flake-parts environments."
+          echo ""
+          echo "Available commands in basic flake mode:"
+          echo "  up       - Start processes"
+          echo "  test     - Run tests"
+          echo "  version  - Show version"
+          exit 1
+        fi
+        ;;
+
       *)
         echo "https://devenv.sh (version ${version}): Fast, Declarative, Reproducible, and Composable Developer Environments"
         echo
-        echo "This is a flake integration wrapper that comes with a subset of functionality from the flakeless devenv CLI."
-        echo
-        echo "Usage: devenv command"
-        echo
-        echo "Commands:"
-        echo
-        echo "test            Runs tests"
-        echo "up              Starts processes in foreground. See http://devenv.sh/processes"
-        echo "version         Display devenv version"
+        if use_full_cli; then
+          echo "Full devenv CLI functionality is available in this flake environment."
+          echo
+          echo "Usage: devenv <command> [args...]"
+          echo
+          echo "Common commands:"
+          echo "  up              Start processes in foreground"
+          echo "  test            Run tests"
+          echo "  tasks           Manage and run tasks"
+          echo "  shell           Enter development shell"
+          echo "  info            Show environment information"
+          echo "  version         Display devenv version"
+          echo
+          echo "For complete command list, run: devenv --help"
+        else
+          echo "This is a flake integration wrapper with basic functionality."
+          echo "Full CLI should be automatically available in flake-parts environments."
+          echo
+          echo "Usage: devenv command"
+          echo
+          echo "Available commands:"
+          echo "  test            Run tests"
+          echo "  up              Start processes in foreground"
+          echo "  version         Display devenv version"
+        fi
         echo
         exit 1
     esac

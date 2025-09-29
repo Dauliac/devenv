@@ -319,17 +319,19 @@ where
     fn on_enter(&self, id: &span::Id, ctx: layer::Context<'_, S>) {
         // Only forward if this is a user message span
         if let Ok(spans) = self.user_message_spans.lock()
-            && spans.contains(id) {
-                self.inner.on_enter(id, ctx);
-            }
+            && spans.contains(id)
+        {
+            self.inner.on_enter(id, ctx);
+        }
     }
 
     fn on_exit(&self, id: &span::Id, ctx: layer::Context<'_, S>) {
         // Only forward if this is a user message span
         if let Ok(spans) = self.user_message_spans.lock()
-            && spans.contains(id) {
-                self.inner.on_exit(id, ctx);
-            }
+            && spans.contains(id)
+        {
+            self.inner.on_exit(id, ctx);
+        }
     }
 
     fn on_close(&self, id: span::Id, ctx: layer::Context<'_, S>) {
@@ -511,32 +513,34 @@ where
         event.record(&mut visitor);
 
         if let Some(span_kind) = visitor.span_event_kind
-            && let Some(span) = ctx.parent_span() {
-                let ext = span.extensions();
+            && let Some(span) = ctx.parent_span()
+        {
+            let ext = span.extensions();
 
-                if let Some(span_ctx) = ext.get::<SpanContext>()
-                    && visitor.is_user_message {
-                        let time_total = format!("{}", span_ctx.timings.total_duration());
-                        let has_error = span_ctx.has_error;
-                        let msg = &span_ctx.msg;
-                        match span_kind {
-                            SpanKind::Start => {
-                                // IndicatifLayer will handle the spinner, but we still need to
-                                // return early to avoid duplicate output in our format layer
-                                return Ok(());
-                            }
-
-                            SpanKind::End => {
-                                let prefix = if has_error {
-                                    style("✖").red()
-                                } else {
-                                    style("✓").green()
-                                };
-                                return writeln!(writer, "{prefix} {msg} in {time_total}");
-                            }
-                        }
+            if let Some(span_ctx) = ext.get::<SpanContext>()
+                && visitor.is_user_message
+            {
+                let time_total = format!("{}", span_ctx.timings.total_duration());
+                let has_error = span_ctx.has_error;
+                let msg = &span_ctx.msg;
+                match span_kind {
+                    SpanKind::Start => {
+                        // IndicatifLayer will handle the spinner, but we still need to
+                        // return early to avoid duplicate output in our format layer
+                        return Ok(());
                     }
+
+                    SpanKind::End => {
+                        let prefix = if has_error {
+                            style("✖").red()
+                        } else {
+                            style("✓").green()
+                        };
+                        return writeln!(writer, "{prefix} {msg} in {time_total}");
+                    }
+                }
             }
+        }
         if let Some(msg) = visitor.message {
             if visitor.is_user_message {
                 let meta = event.metadata();

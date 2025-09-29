@@ -178,6 +178,14 @@ pub struct GlobalOptions {
         long_help = "Activate one or more profiles defined in devenv.nix.\n\nProfiles allow you to define different configurations that can be merged with your base configuration.\n\nSee https://devenv.sh/profiles for more information.\n\nExamples:\n  --profile python-3.14\n  --profile backend --profile fast-startup"
     )]
     pub profile: Vec<String>,
+
+    #[arg(
+        long,
+        global = true,
+        help = "Enable flake-aware mode for devenv CLI",
+        long_help = "Enable flake-aware mode where devenv adapts its behavior for flake-based environments.\n\nThis mode is automatically detected when running inside a flake-managed shell but can be explicitly enabled."
+    )]
+    pub flake_mode: bool,
 }
 
 impl Default for GlobalOptions {
@@ -201,6 +209,7 @@ impl Default for GlobalOptions {
             override_input: vec![],
             option: vec![],
             profile: vec![],
+            flake_mode: false,
         }
     }
 }
@@ -212,6 +221,21 @@ impl GlobalOptions {
         if self.no_eval_cache {
             self.eval_cache = false;
         }
+
+        // Auto-detect flake mode from environment if not explicitly set
+        if !self.flake_mode {
+            self.flake_mode = self.detect_flake_mode();
+        }
+    }
+
+    /// Detect if we're running in a flake-based environment
+    pub fn detect_flake_mode(&self) -> bool {
+        // Check environment variables set by flake integration
+        std::env::var("DEVENV_FLAKE_MODE").unwrap_or_default() == "1" ||
+        std::env::var("DEVENV_FLAKE_SHELL").is_ok() ||
+        // Check if flake.nix exists and we don't have devenv.yaml
+        (std::path::Path::new("flake.nix").exists() &&
+         !std::path::Path::new("devenv.yaml").exists())
     }
 }
 

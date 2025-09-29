@@ -50,19 +50,58 @@ devenvFlake: { flake-parts-lib, lib, inputs, ... }: {
         '';
         default = { };
       };
-      config.devShells = lib.mapAttrs (_name: devenv: devenv.shell) config.devenv.shells;
+      config.devShells = lib.mapAttrs
+        (_name: devenv:
+          devenv.shell.overrideAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [
+              # Always include full devenv CLI for complete functionality in flake mode
+              # Install it as devenv-cli to avoid conflicts with the wrapper
+              (pkgs.runCommand "devenv-cli-wrapper" { } ''
+                mkdir -p $out/bin
+                ln -s ${devenvFlake.packages.${system}.devenv}/bin/devenv $out/bin/devenv-cli
+              '')
+            ];
+            shellHook = (old.shellHook or "") + ''
+              # Mark that we're in a flake-based devenv shell with full CLI
+              export DEVENV_FLAKE_MODE=1
+              export DEVENV_FULL_CLI_AVAILABLE=1
+            '';
+          })
+        )
+        config.devenv.shells;
 
       # Deprecated packages
       # These were used to wire up commands in the devenv shim and are no longer necessary.
       config.packages =
         let
           deprecate = name: value: lib.warn "The package '${name}' is deprecated. Use the corresponding `devenv <cmd>` commands." value;
+
+          # Convert devenv tasks to runnable packages
+          mkTaskPackages = shellName: devenv:
+            lib.concatMapAttrs
+              (taskName: task:
+                {
+                  "${shellPrefix shellName}task-${taskName}" = pkgs.writeShellScriptBin "devenv-task-${taskName}" ''
+                    set -e
+                    ${lib.optionalString (task.cwd != null) "cd ${lib.escapeShellArg task.cwd}"}
+                    ${lib.optionalString (task.command != null) "exec ${task.command}"}
+                  '';
+                }
+              )
+              devenv.tasks;
+
+          # Create a task runner that can execute task graphs
+          mkTaskRunner = shellName: devenv:
+            {
+              "${shellPrefix shellName}tasks-runner" = pkgs.writeShellScriptBin "devenv-tasks-runner" ''
+                # Task runner with dependency resolution
+                exec ${devenv.task.package}/bin/devenv-tasks "$@"
+              '';
+            };
         in
         lib.concatMapAttrs
           (shellName: devenv:
-            # TODO(sander): container support is undocumented and is specific to flake-parts, ie. the CLI shim doesn't support this.
-            # Official support is complicated by `getInput` throwing errors and Nix not being able to properly try/catch errors with `tryEval`.
-            # Until this is fixed, these outputs will remain.
+            # Existing containers and deprecated packages
             (lib.concatMapAttrs
               (containerName: container:
                 { "${shellPrefix shellName}container-${containerName}" = container.derivation; }
@@ -71,6 +110,13 @@ devenvFlake: { flake-parts-lib, lib, inputs, ... }: {
             ) // lib.mapAttrs deprecate {
               "${shellPrefix shellName}devenv-up" = devenv.procfileScript;
               "${shellPrefix shellName}devenv-test" = devenv.test;
+            }
+            # New task packages
+            // (mkTaskPackages shellName devenv)
+            // (mkTaskRunner shellName devenv)
+            // {
+              # Export task configuration for reuse
+              "${shellPrefix shellName}tasks-config" = devenv.task.config;
             }
           )
           config.devenv.shells;

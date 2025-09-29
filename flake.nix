@@ -283,6 +283,7 @@
       flakeModule = self.flakeModules.default; # Backwards compatibility
       flakeModules = {
         default = import ./flake-module.nix self;
+        tasks = import ./task-module.nix self;
         readDevenvRoot =
           { inputs, lib, ... }:
           {

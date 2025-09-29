@@ -736,6 +736,14 @@ impl Devenv {
     }
 
     async fn load_tasks(&self) -> Result<Vec<tasks::TaskConfig>> {
+        if self.global_options.flake_mode {
+            self.load_tasks_from_flake().await
+        } else {
+            self.load_tasks_from_devenv().await
+        }
+    }
+
+    async fn load_tasks_from_devenv(&self) -> Result<Vec<tasks::TaskConfig>> {
         let tasks_json_file = {
             let span = info_span!("load_tasks", devenv.user_message = "Evaluating tasks");
             let gc_root = self.devenv_dot_gc.join("task-config");
@@ -753,24 +761,103 @@ impl Devenv {
         Ok(tasks)
     }
 
+    async fn load_tasks_from_flake(&self) -> Result<Vec<tasks::TaskConfig>> {
+        let span = info_span!(
+            "load_tasks",
+            devenv.user_message = "Loading tasks from flake"
+        );
+
+        // Try to get tasks from different possible flake outputs
+        let shell_name =
+            std::env::var("DEVENV_FLAKE_SHELL").unwrap_or_else(|_| "default".to_string());
+
+        // First try the tasks-config package (from devenv shells)
+        let tasks_config_attr = if shell_name == "default" {
+            "tasks-config".to_string()
+        } else {
+            format!("{}-tasks-config", shell_name)
+        };
+
+        let tasks_json = match self.try_build_flake_tasks(&tasks_config_attr).await {
+            Ok(content) => content,
+            Err(_) => {
+                // Fallback: try to get tasks from standalone task module
+                match self.try_build_flake_tasks("tasks-config").await {
+                    Ok(content) => content,
+                    Err(_) => {
+                        debug!("No tasks found in flake outputs");
+                        return Ok(vec![]);
+                    }
+                }
+            }
+        };
+
+        let tasks: Vec<tasks::TaskConfig> = serde_json::from_str(&tasks_json)
+            .map_err(|e| miette::miette!("Failed to parse tasks config from flake: {}", e))?;
+
+        span.in_scope(|| {
+            debug!("Loaded {} tasks from flake", tasks.len());
+        });
+
+        Ok(tasks)
+    }
+
+    async fn try_build_flake_tasks(&self, attr: &str) -> Result<String> {
+        // Try to build the tasks config from flake
+        let flake_attr = format!("packages.{}.{}", self.global_options.system, attr);
+
+        let output = process::Command::new("nix")
+            .args([
+                "build",
+                &format!(".#{}", flake_attr),
+                "--print-out-paths",
+                "--no-link",
+            ])
+            .output()
+            .await
+            .into_diagnostic()
+            .wrap_err("Failed to execute nix build")?;
+
+        if !output.status.success() {
+            bail!(
+                "Failed to build tasks config from flake attribute: {}",
+                attr
+            );
+        }
+
+        let store_path = String::from_utf8(output.stdout)
+            .into_diagnostic()?
+            .trim()
+            .to_string();
+
+        fs::read_to_string(&store_path)
+            .await
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read tasks config from {}", store_path))
+    }
+
     pub async fn tasks_run(
         &self,
         roots: Vec<String>,
         run_mode: devenv_tasks::RunMode,
     ) -> Result<()> {
-        self.assemble(false).await?;
         if roots.is_empty() {
             bail!("No tasks specified.");
         }
 
-        // Capture the shell environment to ensure tasks run with proper devenv setup
-        let envs = self.capture_shell_environment().await?;
+        // In flake mode, we don't need to assemble devenv.nix
+        if !self.global_options.flake_mode {
+            self.assemble(false).await?;
 
-        // Set environment variables in the current process
-        // This ensures that tasks have access to all devenv environment variables
-        for (key, value) in &envs {
-            unsafe {
-                std::env::set_var(key, value);
+            // Capture the shell environment to ensure tasks run with proper devenv setup
+            let envs = self.capture_shell_environment().await?;
+
+            // Set environment variables in the current process
+            // This ensures that tasks have access to all devenv environment variables
+            for (key, value) in &envs {
+                unsafe {
+                    std::env::set_var(key, value);
+                }
             }
         }
 
@@ -810,7 +897,10 @@ impl Devenv {
     }
 
     pub async fn tasks_list(&self) -> Result<()> {
-        self.assemble(false).await?;
+        // In flake mode, we don't need to assemble devenv.nix
+        if !self.global_options.flake_mode {
+            self.assemble(false).await?;
+        }
 
         let tasks = self.load_tasks().await?;
 

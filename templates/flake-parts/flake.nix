@@ -48,8 +48,27 @@
 
           enterShell = ''
             hello
+            echo "✨ Full devenv CLI is available! Try 'devenv tasks list' or 'devenv info'"
           '';
 
+          # Define example tasks - these can be run with 'devenv tasks run <name>'
+          tasks = {
+            "build" = {
+              description = "Build the project";
+              exec = "echo 'Building project...' && sleep 2 && echo 'Build complete!'";
+            };
+            "lint" = {
+              description = "Lint the codebase";
+              exec = "echo 'Linting codebase...' && echo 'No issues found!'";
+              after = [ "build" ]; # This task runs after build
+            };
+            "setup" = {
+              description = "Set up project dependencies";
+              exec = "echo 'Setting up dependencies...' && echo 'Setup complete!'";
+            };
+          };
+
+          # Example process - can be started with 'devenv up'
           processes.hello.exec = "hello";
         };
 
